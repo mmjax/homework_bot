@@ -34,7 +34,7 @@ HOMEWORK_STATUSES = {
 
 
 def send_message(bot, message):
-    """Отправка сообщения в чат телеграм"""
+    """Отправка сообщения в чат телеграм."""
     try:
         bot.send_message(TELEGRAM_CHAT_ID, message)
         logging.info('Сообщение успешно отправлено!')
@@ -43,7 +43,7 @@ def send_message(bot, message):
 
 
 def wake_up(update, context):
-    """Приветствующее слово"""
+    """Приветствующее слово."""
     chat = update.effective_chat
     name = update.message.chat.first_name
     context.bot.send_message(
@@ -55,7 +55,7 @@ def wake_up(update, context):
 
 
 def get_api_answer(current_timestamp):
-    """Получение списка из API"""
+    """Получение списка из API."""
     timestamp = current_timestamp or int(time.time())
     params = {'from_date': timestamp}
     try:
@@ -90,6 +90,7 @@ def get_api_answer(current_timestamp):
 
 
 def check_response(response):
+    """Проверка ключей о response."""
     if not isinstance(response, dict):
         raise TypeError('RESPONSE_NOT_DICT')
     if 'homeworks' not in response:
@@ -100,7 +101,7 @@ def check_response(response):
 
 
 def parse_status(homework):
-    """Извлечение информации о домашней работе и статуса этой работы"""
+    """Извлечение информации о домашней работе и статуса этой работы."""
     homework_status = homework['status']
     if 'homework_name' not in homework:
         logging.error('Нет ключа')
@@ -113,7 +114,7 @@ def parse_status(homework):
 
 
 def check_tokens():
-    """Проверка токенов"""
+    """Проверка токенов."""
     tokens = {
         'Токен яндекс практикума': PRACTICUM_TOKEN,
         'Токен телеграм бота': TELEGRAM_TOKEN,
