@@ -1,11 +1,13 @@
 import logging
 import os
-import requests
 import time
+from logging import StreamHandler, FileHandler
+
+import requests
 import telegram
 
 from dotenv import load_dotenv
-from logging import StreamHandler, FileHandler
+from exceptions import UnexpectedCodeError, ResponseError
 from telegram.ext import CommandHandler, Updater
 
 load_dotenv()
@@ -14,7 +16,7 @@ PRACTICUM_TOKEN = os.getenv('PRACTICUM_TOKEN')
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
-RETRY_TIME = 15
+RETRY_TIME = 600
 ENDPOINT = 'https://practicum.yandex.ru/api/user_api/homework_statuses/'
 HEADERS = {'Authorization': f'OAuth {PRACTICUM_TOKEN}'}
 
@@ -31,10 +33,13 @@ API_ANSWER_ERROR = ('Не удалось получить ответ от API. '
                     'Ошибка - {} Endpoint - {} Header - {} params - {}')
 SUCCESSFUL_SENDING = 'Сообщение {} успешно отправлено!'
 SENDING_ERROR = 'Не удалось отправить сообщение {}. Ошибка {}'
-API_ERROR = ('response error - {} status code - {}'
+API_ERROR = ('response error - {} '
              'Endpoint - {} Heders - {} params - {}')
-ENDPOINT_ERROR = 'Недоступен эндпоинт {}. Код ответа {}'
+ENDPOINT_ERROR = ('Недоступен эндпоинт {}. Код ответа {}.'
+                  ' Params - {}. Header - {}')
 ERROR = 'Сбой в работе программы: {}'
+TOKENS = ('PRACTICUM_TOKEN', 'TELEGRAM_TOKEN', 'TELEGRAM_CHAT_ID')
+MISSING_TOKEN = 'Отсутствует токен {}'
 
 VERDICTS = {
     'approved': 'Работа проверена: ревьюеру всё понравилось. Ура!',
@@ -68,26 +73,26 @@ def get_api_answer(current_timestamp):
     try:
         response = requests.get(ENDPOINT, headers=HEADERS, params=params)
     except requests.exceptions as error:
-        raise KeyError(
+        raise ConnectionError(
             API_ANSWER_ERROR.format(error, ENDPOINT, HEADERS, params)
         )
     response_json = response.json()
     status_code = response.status_code
-    if status_code != 200:
-        if 'error' or 'code' in response_json:
-            raise KeyError(
+    for key in response_json:
+        if 'code' in key or 'error' in key:
+            print(response_json[key])
+            raise ResponseError(
                 API_ERROR.format(
-                    response_json['code'],
-                    response_json['error'],
+                    response_json[key],
                     ENDPOINT,
                     HEADERS,
                     params
                 )
             )
-        else:
-            raise KeyError(
-                ENDPOINT_ERROR.format(ENDPOINT, response_json['code'])
-            )
+    if status_code != 200:
+        raise UnexpectedCodeError(
+            ENDPOINT_ERROR.format(ENDPOINT, status_code, params, HEADERS)
+        )
     logging.debug('Endpoint = 200')
     return response_json
 
@@ -100,26 +105,27 @@ def check_response(response):
         raise KeyError(HOMEWORKS_NOT_IN_RESPONSE)
     if not isinstance(response['homeworks'], list):
         raise TypeError(HOMEWORKS_NOT_LIST)
-    return response.get('homeworks')
+    return response['homeworks']
 
 
 def parse_status(homework):
     """Извлечение информации о домашней работе и статуса этой работы."""
-    homework_status = homework['status']
-    homework_name = homework['homework_name']
-    if homework_status not in VERDICTS:
-        raise ValueError(UNKNOWN_STATUS.format(homework_status))
-    verdict = VERDICTS.get(homework_status)
-    return (CHANGED_STATUS.format(homework_name, verdict))
+    status = homework['status']
+    if status not in VERDICTS:
+        raise KeyError(UNKNOWN_STATUS.format(status))
+    return CHANGED_STATUS.format(
+        homework['homework_name'],
+        VERDICTS.get(status)
+    )
 
 
 def check_tokens():
     """Проверка токенов."""
-    tokens = ('PRACTICUM_TOKEN', 'TELEGRAM_TOKEN', 'TELEGRAM_CHAT_ID')
-    for name in tokens:
+    for name in TOKENS:
         if globals()[name] is None:
+            logging.error(MISSING_TOKEN.format(name))
             return False
-        return True
+    return True
 
 
 def main():
@@ -128,16 +134,18 @@ def main():
         raise KeyError('WRONG_TOKENS')
     updater = Updater(TELEGRAM_TOKEN)
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
-    current_timestamp = int(time.time())
+    timestamp = int(time.time())
     while True:
         try:
-            response = get_api_answer(current_timestamp)
-            if (len(response.get('homeworks')) != 0):
-                send_message(bot, parse_status(check_response(response)[0]))
-            current_timestamp = response['current_date']
+            response = check_response(get_api_answer(timestamp))
+            if (len(response) != 0):
+                send_message(bot, parse_status(response[0]))
+            if 'current_date' in response:
+                timestamp = response['current_date']
         except Exception as error:
-            logging.error(ERROR.format(error))
-            bot.send_message(TELEGRAM_CHAT_ID, ERROR.format(error))
+            message = ERROR.format(error)
+            logging.error(message)
+            send_message(TELEGRAM_CHAT_ID, message)
         updater.dispatcher.add_handler(CommandHandler('start', wake_up))
         updater.start_polling()
         time.sleep(RETRY_TIME)
@@ -150,6 +158,9 @@ if __name__ == '__main__':
             StreamHandler(),
             FileHandler(filename=__file__ + '.log', encoding='UTF-8')
         ],
-        format='%(asctime)s - %(levelname)s - %(message)s - %(name)s',
+        format=(
+            '%(asctime)s - %(levelname)s - %(funcName)s '
+            '- %(lineno)d - %(message)s'
+        ),
     )
     main()
