@@ -3,12 +3,12 @@ import os
 import time
 from logging import StreamHandler, FileHandler
 
+from dotenv import load_dotenv
 import requests
 import telegram
-
-from dotenv import load_dotenv
-from exceptions import UnexpectedCodeError, ResponseError
 from telegram.ext import CommandHandler, Updater
+
+from exceptions import UnexpectedCodeError, ResponseError
 
 load_dotenv()
 
@@ -33,7 +33,7 @@ API_ANSWER_ERROR = ('Не удалось получить ответ от API. '
                     'Ошибка - {} Endpoint - {} Header - {} params - {}')
 SUCCESSFUL_SENDING = 'Сообщение {} успешно отправлено!'
 SENDING_ERROR = 'Не удалось отправить сообщение {}. Ошибка {}'
-API_ERROR = ('response error - {} '
+API_ERROR = ('ключ ошибки - {} response error - {} '
              'Endpoint - {} Heders - {} params - {}')
 ENDPOINT_ERROR = ('Недоступен эндпоинт {}. Код ответа {}.'
                   ' Params - {}. Header - {}')
@@ -78,11 +78,11 @@ def get_api_answer(current_timestamp):
         )
     response_json = response.json()
     status_code = response.status_code
-    for key in response_json:
-        if 'code' in key or 'error' in key:
-            print(response_json[key])
+    for key in ['code', 'error']:
+        if key in response_json:
             raise ResponseError(
                 API_ERROR.format(
+                    key,
                     response_json[key],
                     ENDPOINT,
                     HEADERS,
@@ -112,7 +112,7 @@ def parse_status(homework):
     """Извлечение информации о домашней работе и статуса этой работы."""
     status = homework['status']
     if status not in VERDICTS:
-        raise KeyError(UNKNOWN_STATUS.format(status))
+        raise ValueError(UNKNOWN_STATUS.format(status))
     return CHANGED_STATUS.format(
         homework['homework_name'],
         VERDICTS.get(status)
@@ -121,10 +121,11 @@ def parse_status(homework):
 
 def check_tokens():
     """Проверка токенов."""
-    for name in TOKENS:
-        if globals()[name] is None:
+    invalid_tokens = [name for name in TOKENS if not globals()[name]]
+    if invalid_tokens:
+        for name in invalid_tokens:
             logging.error(MISSING_TOKEN.format(name))
-            return False
+        return False
     return True
 
 
@@ -137,15 +138,15 @@ def main():
     timestamp = int(time.time())
     while True:
         try:
-            response = check_response(get_api_answer(timestamp))
-            if (len(response) != 0):
-                send_message(bot, parse_status(response[0]))
-            if 'current_date' in response:
-                timestamp = response['current_date']
+            response = get_api_answer(timestamp)
+            homework_list = check_response(response)
+            if homework_list:
+                send_message(bot, parse_status(homework_list[0]))
+            timestamp = response.get('current_date', timestamp)
         except Exception as error:
             message = ERROR.format(error)
             logging.error(message)
-            send_message(TELEGRAM_CHAT_ID, message)
+            send_message(bot, message)
         updater.dispatcher.add_handler(CommandHandler('start', wake_up))
         updater.start_polling()
         time.sleep(RETRY_TIME)
