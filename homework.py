@@ -111,12 +111,10 @@ def check_response(response):
 def parse_status(homework):
     """Извлечение информации о домашней работе и статуса этой работы."""
     status = homework['status']
+    verdict = VERDICTS[status]
     if status not in VERDICTS:
         raise ValueError(UNKNOWN_STATUS.format(status))
-    return CHANGED_STATUS.format(
-        homework['homework_name'],
-        VERDICTS.get(status)
-    )
+    return CHANGED_STATUS.format(homework['homework_name'], verdict)
 
 
 def check_tokens():
